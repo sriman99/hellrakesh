@@ -24,12 +24,23 @@ export function useAnimationLoop({
 }: AnimationLoopProps) {
 
   useEffect(() => {
-    if (!sceneState.isInitialized) return;
+    if (!sceneState.isInitialized) {
+      console.log("🎬 ANIMATION: Waiting for scene initialization...");
+      return;
+    }
+
+    console.log("🎬 ANIMATION: Starting animation loop");
+    let frameCount = 0;
+    let lastAnalyserCheck = 0;
 
     const animate = () => {
+      frameCount++;
       const { sceneRef } = sceneState;
-      
+
       if (!sceneRef.sphere || !sceneRef.backdrop || !sceneRef.composer) {
+        if (frameCount % 60 === 0) { // Log every 60 frames
+          console.log("🎬 ANIMATION: Waiting for scene objects to be ready...");
+        }
         sceneRef.animationId = requestAnimationFrame(animate);
         return;
       }
@@ -46,38 +57,40 @@ export function useAnimationLoop({
 
       // Get current analyser - prioritize agent audio when speaking
       let currentAnalyser: Analyser | undefined;
-      
+      let analyserSource = 'none';
+
+      // Log analyser status every 2 seconds
+      if (t - lastAnalyserCheck > 2000) {
+        lastAnalyserCheck = t;
+        console.log('🎬 ANIMATION: Analyser status check:', {
+          hasAgentAnalyser: !!audioState.audioRef.agentAnalyser,
+          hasUserAnalyser: !!audioState.audioRef.userAnalyser,
+          isPlayingAgent: audioState.isPlayingAgent,
+          isAgentSpeaking: isAgentSpeaking,
+          isListening: audioState.isListening,
+          isUserMicOn: isUserMicOn,
+          frameCount: frameCount
+        });
+      }
+
       // Priority 1: Agent audio when agent is speaking (check both states)
       if (audioState.audioRef.agentAnalyser && (audioState.isPlayingAgent || isAgentSpeaking)) {
         currentAnalyser = audioState.audioRef.agentAnalyser;
-        // Only log occasionally to avoid spam
-        if (Math.random() < 0.01) { // 1% chance
-          console.log('🔊 ANIMATION: Using ElevenLabs audio', {
-            isPlayingAgent: audioState.isPlayingAgent,
-            isAgentSpeaking: isAgentSpeaking,
-            hasAnalyser: !!audioState.audioRef.agentAnalyser
-          });
-        }
+        analyserSource = 'agent-primary';
       }
       // Priority 2: User microphone when available and agent is not speaking
       else if (audioState.audioRef.userAnalyser && audioState.isListening && isUserMicOn && !isAgentSpeaking && !audioState.isPlayingAgent) {
         currentAnalyser = audioState.audioRef.userAnalyser;
-        if (Math.random() < 0.01) { // 1% chance
-          console.log('🎙️ ANIMATION: Using user microphone');
-        }
+        analyserSource = 'user-primary';
       }
       // Fallback: Use any available analyser
       else if (audioState.audioRef.agentAnalyser) {
         currentAnalyser = audioState.audioRef.agentAnalyser;
-        if (Math.random() < 0.01) { // 1% chance
-          console.log('🔊 ANIMATION: Fallback ElevenLabs audio');
-        }
+        analyserSource = 'agent-fallback';
       }
       else if (audioState.audioRef.userAnalyser && audioState.isListening) {
         currentAnalyser = audioState.audioRef.userAnalyser;
-        if (Math.random() < 0.01) { // 1% chance
-          console.log('🎙️ ANIMATION: Fallback user microphone');
-        }
+        analyserSource = 'user-fallback';
       }
 
       // Animate sphere if we have audio analyser
@@ -85,15 +98,24 @@ export function useAnimationLoop({
         // Update audio analysis
         currentAnalyser.update();
 
-        // Debug frequency data occasionally
-        if (Math.random() < 0.005) { // 0.5% chance to avoid spam
-          const hasData = currentAnalyser.data.some(v => v > 0);
-          const maxValue = Math.max(...Array.from(currentAnalyser.data));
-          console.log('🎭 ANIMATION DATA:', {
+        // Get frequency data
+        const dataArray = Array.from(currentAnalyser.data);
+        const hasData = dataArray.some(v => v > 0);
+        const maxValue = Math.max(...dataArray);
+        const bin1 = currentAnalyser.data[1];
+        const bin2 = currentAnalyser.data[2];
+
+        // Log animation data every 2 seconds when using analyser
+        if (t - lastAnalyserCheck > 1900 && t - lastAnalyserCheck < 2100) { // Within 200ms of analyser check
+          console.log('🎭 ANIMATION: Processing frequency data:', {
+            source: analyserSource,
             hasData,
             maxValue,
-            bins: Array.from(currentAnalyser.data.slice(0, 5)),
-            animating: hasData ? '✅' : '❌'
+            bin1Value: bin1,
+            bin2Value: bin2,
+            scaleMultiplier: (0.2 * bin1) / 255,
+            firstEightBins: dataArray.slice(0, 8),
+            animating: hasData ? '✅ ANIMATING' : '❌ NO DATA'
           });
         }
 
@@ -138,6 +160,18 @@ export function useAnimationLoop({
           );
         }
       } else {
+        // No analyser available - log this occasionally
+        if (frameCount % 120 === 0) { // Every 2 seconds at 60fps
+          console.log('🎭 ANIMATION: No analyser available for animation:', {
+            analyserSource,
+            hasAgentAnalyser: !!audioState.audioRef.agentAnalyser,
+            hasUserAnalyser: !!audioState.audioRef.userAnalyser,
+            isPlayingAgent: audioState.isPlayingAgent,
+            isAgentSpeaking: isAgentSpeaking,
+            frameCount
+          });
+        }
+
         // Reset sphere to default state when not animating (prevent flickering)
         if (Math.abs(sphere.scale.x - 1) > 0.01) {
           sphere.scale.setScalar(1);

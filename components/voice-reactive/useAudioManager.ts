@@ -101,17 +101,28 @@ export function useAudioManager({
   useEffect(() => {
     const playElevenLabsAudio = async (audioData: string) => {
       try {
-        console.log("🎯 ANIMATION PRIORITY: Starting ElevenLabs audio playback...", {
+        console.log("🎯 ====== STARTING ELEVENLABS AUDIO PIPELINE ======");
+        console.log("🎯 STEP 1 - INITIAL DATA:", {
           hasAudioData: !!audioData,
           isAgentSpeaking: isAgentSpeaking,
           dataType: audioData?.substring(0, 20),
-          dataLength: audioData?.length
+          dataLength: audioData?.length,
+          timestamp: new Date().toISOString()
         });
 
         // Create audio context if not exists
+        console.log("🎯 STEP 2 - AUDIO CONTEXT SETUP");
         if (!audioRef.current.audioContext) {
+          console.log("📐 Creating new AudioContext...");
           audioRef.current.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-          console.log("📐 Created new AudioContext", {
+          console.log("📐 AudioContext created:", {
+            sampleRate: audioRef.current.audioContext.sampleRate,
+            state: audioRef.current.audioContext.state,
+            baseLatency: audioRef.current.audioContext.baseLatency,
+            outputLatency: audioRef.current.audioContext.outputLatency
+          });
+        } else {
+          console.log("📐 Using existing AudioContext:", {
             sampleRate: audioRef.current.audioContext.sampleRate,
             state: audioRef.current.audioContext.state
           });
@@ -121,10 +132,11 @@ export function useAudioManager({
 
         // Ensure audio context is in running state
         if (audioContext.state === 'suspended') {
-          console.log("🔄 Resuming suspended audio context...");
+          console.log("🔄 STEP 2.1 - Resuming suspended audio context...");
           await audioContext.resume();
+          console.log("🔄 AudioContext resumed, new state:", audioContext.state);
         }
-        console.log("✅ AudioContext ready, state:", audioContext.state);
+        console.log("✅ STEP 2 COMPLETE - AudioContext ready, state:", audioContext.state);
 
         // Determine and process audio URL - ALWAYS use proxy for external URLs
         let audioUrl = audioData;
@@ -144,13 +156,16 @@ export function useAudioManager({
           }
         }
 
-        console.log("🔗 AUDIO PROCESSING:", {
-          original: audioData.substring(0, 80) + "...",
-          processed: audioUrl.substring(0, 80) + "...",
+        console.log("🎯 STEP 3 - URL PROCESSING COMPLETE:");
+        console.log("🔗 Original URL:", audioData.substring(0, 100) + "...");
+        console.log("🔗 Processed URL:", audioUrl.substring(0, 100) + "...");
+        console.log("🔗 Processing flags:", {
           usingProxy: useProxy,
           isDataUrl: audioUrl.startsWith('data:'),
           isBlobUrl: audioUrl.startsWith('blob:'),
-          isProxied: audioUrl.includes('/api/proxy-audio')
+          isProxied: audioUrl.includes('/api/proxy-audio'),
+          originalLength: audioData.length,
+          processedLength: audioUrl.length
         });
 
         let audioBuffer: AudioBuffer | null = null;
@@ -158,7 +173,8 @@ export function useAudioManager({
 
         try {
           // PRIORITY 1: Try to fetch and decode for FULL animation support
-          console.log("🚀 ATTEMPTING ANIMATION + AUDIO (BufferSource approach)...");
+          console.log("🎯 STEP 4 - STARTING FETCH & DECODE FOR ANIMATION");
+          console.log("🚀 Attempting BufferSource approach for full animation support...");
 
           const fetchOptions: RequestInit = {
             method: 'GET',
@@ -167,8 +183,17 @@ export function useAudioManager({
             cache: 'default'
           };
 
-          console.log("📡 Fetching audio...", { url: audioUrl.substring(0, 100), options: fetchOptions });
+          console.log("📡 STEP 4.1 - Initiating fetch:", {
+            url: audioUrl.substring(0, 100) + "...",
+            options: fetchOptions,
+            timestamp: Date.now()
+          });
+
+          const fetchStart = performance.now();
           const response = await fetch(audioUrl, fetchOptions);
+          const fetchTime = performance.now() - fetchStart;
+
+          console.log("📡 STEP 4.2 - Fetch completed in", fetchTime.toFixed(2), "ms");
 
           console.log("📊 Fetch response:", {
             ok: response.ok,
@@ -183,22 +208,34 @@ export function useAudioManager({
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
           }
 
+          const arrayBufferStart = performance.now();
           const arrayBuffer = await response.arrayBuffer();
-          console.log("💾 Audio data fetched successfully:", {
+          const arrayBufferTime = performance.now() - arrayBufferStart;
+
+          console.log("💾 STEP 4.3 - ArrayBuffer created in", arrayBufferTime.toFixed(2), "ms:", {
             size: arrayBuffer.byteLength + " bytes",
-            sizeMB: (arrayBuffer.byteLength / 1024 / 1024).toFixed(2) + " MB"
+            sizeMB: (arrayBuffer.byteLength / 1024 / 1024).toFixed(2) + " MB",
+            isValidSize: arrayBuffer.byteLength > 0
           });
 
+          if (arrayBuffer.byteLength === 0) {
+            throw new Error("Received empty audio data from server");
+          }
+
           // Decode audio data
-          console.log("🎵 Decoding audio buffer...");
-          audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+          console.log("🎵 STEP 4.4 - Starting audio decoding...");
+          const decodeStart = performance.now();
+          audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0)); // Clone to avoid transfer issues
+          const decodeTime = performance.now() - decodeStart;
           animationEnabled = true;
 
-          console.log("🎉 ANIMATION ENABLED! Audio decoded successfully:", {
+          console.log("🎉 STEP 4.5 - AUDIO DECODED SUCCESSFULLY in", decodeTime.toFixed(2), "ms!");
+          console.log("🎉 ANIMATION ENABLED! Buffer details:", {
             duration: audioBuffer.duration.toFixed(2) + "s",
             channels: audioBuffer.numberOfChannels,
             sampleRate: audioBuffer.sampleRate + " Hz",
-            length: audioBuffer.length + " samples"
+            length: audioBuffer.length + " samples",
+            validBuffer: !!audioBuffer
           });
 
         } catch (fetchError) {
@@ -221,22 +258,37 @@ export function useAudioManager({
 
         if (animationEnabled && audioBuffer) {
           // SUCCESS: Full animation + audio with BufferSource
-          console.log("🎨 ANIMATION MODE: Setting up audio pipeline...");
+          console.log("🎯 STEP 5 - SETTING UP ANIMATION PIPELINE");
+          console.log("🎨 SUCCESS! Setting up BufferSource audio pipeline...");
 
+          console.log("🔧 STEP 5.1 - Creating BufferSource...");
           const bufferSource = audioContext.createBufferSource();
           bufferSource.buffer = audioBuffer;
+          console.log("🔧 BufferSource created:", {
+            buffer: !!bufferSource.buffer,
+            duration: bufferSource.buffer?.duration,
+            channels: bufferSource.buffer?.numberOfChannels
+          });
 
+          console.log("🔧 STEP 5.2 - Creating GainNode...");
           const gainNode = audioContext.createGain();
           gainNode.gain.value = 1.0;
+          console.log("🔧 GainNode created with gain:", gainNode.gain.value);
 
+          console.log("🔧 STEP 5.3 - Connecting audio nodes...");
           // Connect: BufferSource -> GainNode -> [Analyser + Destination]
           bufferSource.connect(gainNode);
+          console.log("🔧 BufferSource connected to GainNode");
 
+          console.log("🔧 STEP 5.4 - Creating Analyser...");
           // Create analyser for animation (connected to gain node)
           const analyser = new Analyser(gainNode);
+          console.log("🔧 Analyser created and connected to GainNode");
 
           // Connect to destination for audio output
           gainNode.connect(audioContext.destination);
+          console.log("🔧 GainNode connected to AudioDestination");
+          console.log("🔧 STEP 5.4 COMPLETE - Audio pipeline connected:");
 
           // Verify analyser will get data with multiple checks
           const verifyAnimation = () => {
